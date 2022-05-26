@@ -1,39 +1,50 @@
 // based on https://github.com/shamsdev/davinci
 
 using System;
-using System.Collections;
-using System.Collections.Generic;
 using System.IO;
 using System.Text;
-using UnityEngine;
-using UnityEngine.Events;
 using UnityEngine.Networking;
+using System.Collections.Generic;
+
+using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.Events;
+using System.Collections;
 
 /// <inheritdoc />
 /// <summary>
-/// PicLoader - A Run-Time image downloading and caching library.
+/// PicLoader - A Run-Time inputImage downloading and caching library.
 /// Ex.
 /// PicLoader.Init()
 /// 	.Set(artUrl)
 /// 	.SetCached(true)
-/// 	.Into(renderer)
+/// 	.Into(inputRenderer)
 /// 	.SetFadeTime(0f)
 /// 	.SetLoadingPlaceholder(placeholderTexture)
 /// 	.Run();
 /// </summary>
 public class PicLoader : MonoBehaviour
 {
-	private static readonly string filePath = Application.persistentDataPath + "/" + "PicLoader" + "/";
+	//static self reference
+	private static GameObject instance;
+	
+	//Inputs
+	private GameObject targetObj;
+	private string url;
 
-	private static bool ENABLE_GLOBAL_LOGS = true;
-
-	private bool enableLog = false;
-	private float fadeTime = 1;
+	//Settings 
+	private static readonly string Filepath = Application.persistentDataPath + "/" + "PicLoader" + "/";
+	private static readonly bool EnableGlobalLogs = true;
+	
+	private bool enableLog;
 	private bool cached = true;
-	private int timeout = 30;
+	private bool destroyOnFinish;//destroys loader gameObject after last Image (of a collection) finished
+	private float fadeTime = 1;
+	private int timeout = 15;
 	private int timeoutAttempts = 3;
-
+	
+	private Texture2D loadingPlaceholder, errorPlaceholder;
+	
 	private enum RendererType
 	{
 		None,
@@ -41,13 +52,9 @@ public class PicLoader : MonoBehaviour
 		Renderer,
 		RawImage
 	}
-
 	private RendererType rendererType = RendererType.None;
-	private GameObject targetObj;
-	private string url = null;
-
-	private Texture2D loadingPlaceholder, errorPlaceholder;
-
+	
+	//Other Vars
 	private UnityAction onStartAction,
 		onDownloadedAction,
 		onLoadedAction,
@@ -56,192 +63,237 @@ public class PicLoader : MonoBehaviour
 	private UnityAction<int> onDownloadProgressChange;
 	private UnityAction<string> onErrorAction;
 
-	private static readonly Dictionary<string, PicLoader> underProcess = new Dictionary<string, PicLoader>();
+	private static readonly Dictionary<string, PicLoader> UnderProcess = new ();
 
 	private string uniqueHash;
 	private int progress;
 
+	#region Actions
+
+	public PicLoader OnStart(UnityAction inputAction)
+	{
+		onStartAction = inputAction;
+
+		if (enableLog)
+			Debug.Log("[PicLoader] On start inputAction set : " + inputAction);
+
+		return this;
+	}
+
+	public PicLoader OnDownloaded(UnityAction inputAction)
+	{
+		onDownloadedAction = inputAction;
+
+		if (enableLog)
+			Debug.Log("[PicLoader] On downloaded inputAction set : " + inputAction);
+
+		return this;
+	}
+
+	public PicLoader OnDownloadProgressChanged(UnityAction<int> inputAction)
+	{
+		onDownloadProgressChange = inputAction;
+
+		if (enableLog)
+			Debug.Log("[PicLoader] On download progress changed inputAction set : " + inputAction);
+
+		return this;
+	}
+
+	public PicLoader OnLoaded(UnityAction inputAction)
+	{
+		onLoadedAction = inputAction;
+
+		if (enableLog)
+			Debug.Log("[PicLoader] On loaded inputAction set : " + inputAction);
+
+		return this;
+	}
+
+	public PicLoader OnError(UnityAction<string> inputAction)
+	{
+		onErrorAction = inputAction;
+
+		if (enableLog)
+			Debug.Log("[PicLoader] On error inputAction set : " + inputAction);
+
+		return this;
+	}
+
+	public PicLoader OnEnd(UnityAction inputAction)
+	{
+		onEndAction = inputAction;
+
+		if (enableLog)
+			Debug.Log("[PicLoader] On end inputAction set : " + inputAction);
+
+		return this;
+	}
+
+	#endregion
+	
 	/// <summary>
 	/// Get instance of picLoader class
 	/// </summary>
 	public static PicLoader Init()
 	{
-		return new GameObject("PicLoader").AddComponent<PicLoader>();
+		if (instance == null)
+		{
+			instance = new GameObject("PicLoader");
+			return instance.AddComponent<PicLoader>();
+		}
+		
+		return instance.AddComponent<PicLoader>();
 	}
 
 	/// <summary>
-	/// Set image url for download.
+	/// Set inputImage inputSettings for download.
 	/// </summary>
-	/// <param name="url">Image Url</param>
+	/// <param name="inputUrl">Image Url</param>
 	/// <returns></returns>
-	public PicLoader Set(string url)
+	public PicLoader Set(string inputUrl)
 	{
 		if (enableLog)
-			Debug.Log("[PicLoader] Url set : " + url);
+			Debug.Log("[PicLoader] Url set : " + inputUrl);
 
-		this.url = url;
+		url = inputUrl;
+		return this;
+	}
+	
+	/// <summary>
+	/// Set All Settings for PicLoader
+	/// </summary>
+	/// <param name="inputSettings">Image Url</param>
+	/// <returns></returns>
+	public PicLoader SetSettings(PicLoaderSettings inputSettings)
+	{
+		if (enableLog)
+			Debug.Log("[PicLoader] Settings set : " + inputSettings.name);
+
+		SetEnableLog(inputSettings.enableLog);
+		SetCached(inputSettings.cached);
+		SetFadeTime(inputSettings.fadeTime);
+		SetTimeout(inputSettings.timeout, inputSettings.timeoutAttempts);
+
+		SetLoadingPlaceholder(inputSettings.loadingPlaceholder);
+		SetErrorPlaceholder(inputSettings.errorPlaceholder);
+		
 		return this;
 	}
 
 	/// <summary>
 	/// Set fading animation time.
 	/// </summary>
-	/// <param name="fadeTime">Fade animation time. Set 0 for disable fading.</param>
+	/// <param name="inputFadeTime">Fade animation time. Set 0 for disable fading.</param>
 	/// <returns></returns>
-	public PicLoader SetFadeTime(float fadeTime)
+	public PicLoader SetFadeTime(float inputFadeTime)
 	{
 		if (enableLog)
-			Debug.Log("[PicLoader] Fading time set : " + fadeTime);
+			Debug.Log("[PicLoader] Fading time set : " + inputFadeTime);
 
-		this.fadeTime = fadeTime;
+		fadeTime = inputFadeTime;
 		return this;
 	}
 
 	/// <summary>
 	/// Set target Image component.
 	/// </summary>
-	/// <param name="image">target Unity UI image component</param>
+	/// <param name="inputImage">target Unity UI inputImage component</param>
 	/// <returns></returns>
-	public PicLoader Into(Image image)
+	public PicLoader Into(Image inputImage)
 	{
 		if (enableLog)
-			Debug.Log("[PicLoader] Target as UIImage set : " + image);
+			Debug.Log("[PicLoader] Target as UIImage set : " + inputImage);
 
 		rendererType = RendererType.UiImage;
-		this.targetObj = image.gameObject;
+		targetObj = inputImage.gameObject;
 		return this;
 	}
 
 	/// <summary>
 	/// Set target Renderer component.
 	/// </summary>
-	/// <param name="renderer">target renderer component</param>
+	/// <param name="inputRenderer">target inputRenderer component</param>
 	/// <returns></returns>
-	public PicLoader Into(Renderer renderer)
+	public PicLoader Into(Renderer inputRenderer)
 	{
 		if (enableLog)
-			Debug.Log("[PicLoader] Target as Renderer set : " + renderer);
+			Debug.Log("[PicLoader] Target as Renderer set : " + inputRenderer);
 
 		rendererType = RendererType.Renderer;
-		this.targetObj = renderer.gameObject;
+		targetObj = inputRenderer.gameObject;
 		return this;
 	}
 
-	public PicLoader Into(RawImage rawImage)
+	public PicLoader Into(RawImage inputRawImage)
 	{
 		if (enableLog)
-			Debug.Log("[PicLoader] Target as RawImage set : " + rawImage);
+			Debug.Log("[PicLoader] Target as RawImage set : " + inputRawImage);
 
 		rendererType = RendererType.RawImage;
-		this.targetObj = rawImage.gameObject;
+		targetObj = inputRawImage.gameObject;
 		return this;
 	}
-
-	#region Actions
-
-	public PicLoader OnStart(UnityAction action)
-	{
-		this.onStartAction = action;
-
-		if (enableLog)
-			Debug.Log("[PicLoader] On start action set : " + action);
-
-		return this;
-	}
-
-	public PicLoader OnDownloaded(UnityAction action)
-	{
-		this.onDownloadedAction = action;
-
-		if (enableLog)
-			Debug.Log("[PicLoader] On downloaded action set : " + action);
-
-		return this;
-	}
-
-	public PicLoader OnDownloadProgressChanged(UnityAction<int> action)
-	{
-		this.onDownloadProgressChange = action;
-
-		if (enableLog)
-			Debug.Log("[PicLoader] On download progress changed action set : " + action);
-
-		return this;
-	}
-
-	public PicLoader OnLoaded(UnityAction action)
-	{
-		this.onLoadedAction = action;
-
-		if (enableLog)
-			Debug.Log("[PicLoader] On loaded action set : " + action);
-
-		return this;
-	}
-
-	public PicLoader OnError(UnityAction<string> action)
-	{
-		this.onErrorAction = action;
-
-		if (enableLog)
-			Debug.Log("[PicLoader] On error action set : " + action);
-
-		return this;
-	}
-
-	public PicLoader OnEnd(UnityAction action)
-	{
-		this.onEndAction = action;
-
-		if (enableLog)
-			Debug.Log("[PicLoader] On end action set : " + action);
-
-		return this;
-	}
-
-	#endregion
 
 	/// <summary>
 	/// Show or hide logs in console.
 	/// </summary>
-	/// <param name="enable">'true' for show logs in console.</param>
+	/// <param name="inputEnable">'true' for show logs in console.</param>
 	/// <returns></returns>
-	public PicLoader SetEnableLog(bool enable)
+	public PicLoader SetEnableLog(bool inputEnable)
 	{
-		this.enableLog = enable;
+		enableLog = inputEnable;
 
-		if (enable)
+		if (inputEnable)
 			Debug.Log("[PicLoader] Logging enabled : true");
 
 		return this;
 	}
-
+	
 	/// <summary>
-	/// Set the sprite of image when picLoader is downloading and loading image
+	/// Sets Destroy on Finish
 	/// </summary>
-	/// <param name="placeholder">loading texture</param>
+	/// <param name="inputDestroyOnFinish">
+	/// 'true' for destroy gameObject
+	/// after last image of a collection
+	/// downloaded and loaded into renderer</param>
 	/// <returns></returns>
-	public PicLoader SetLoadingPlaceholder(Texture2D placeholder)
+	public PicLoader SetDestroyOnFinish(bool inputDestroyOnFinish)
 	{
-		this.loadingPlaceholder = placeholder;
+		destroyOnFinish = inputDestroyOnFinish;
 
 		if (enableLog)
-			Debug.Log("[PicLoader] Loading placeholder has been set.");
+			Debug.Log("[PicLoader] Destroy on Finish enabled" + inputDestroyOnFinish);
 
 		return this;
 	}
 
 	/// <summary>
-	/// Set image sprite when some error occurred during downloading or loading image
+	/// Set the sprite of inputImage when picLoader is downloading and loading inputImage
 	/// </summary>
-	/// <param name="placeholder">error texture</param>
+	/// <param name="inputPlaceholder">loading inputTexture</param>
 	/// <returns></returns>
-	public PicLoader SetErrorPlaceholder(Texture2D placeholder)
+	public PicLoader SetLoadingPlaceholder(Texture2D inputPlaceholder)
 	{
-		this.errorPlaceholder = placeholder;
+		loadingPlaceholder = inputPlaceholder;
 
-		if (enableLog)
-			Debug.Log("[PicLoader] Error placeholder has been set.");
+		if (enableLog && inputPlaceholder)
+			Debug.Log("[PicLoader] Loading inputPlaceholder has been set.");
+
+		return this;
+	}
+
+	/// <summary>
+	/// Set inputImage sprite when some error occurred during downloading or loading inputImage
+	/// </summary>
+	/// <param name="inputPlaceholder">error inputTexture</param>
+	/// <returns></returns>
+	public PicLoader SetErrorPlaceholder(Texture2D inputPlaceholder)
+	{
+		errorPlaceholder = inputPlaceholder;
+
+		if (enableLog && inputPlaceholder)
+			Debug.Log("[PicLoader] Error inputPlaceholder has been set.");
 
 		return this;
 	}
@@ -250,29 +302,29 @@ public class PicLoader : MonoBehaviour
 	/// Enable cache
 	/// </summary>
 	/// <returns></returns>
-	public PicLoader SetCached(bool cached)
+	public PicLoader SetCached(bool inputCached)
 	{
-		this.cached = cached;
+		cached = inputCached;
 
 		if (enableLog)
-			Debug.Log("[PicLoader] Cache enabled : " + cached);
+			Debug.Log("[PicLoader] Cache enabled : " + inputCached);
 
 		return this;
 	}
 
 	/// <summary>
-	/// Set timeout & connection attempts.
+	/// Set inputTimeout & connection inputAttempts.
 	/// </summary>
-	/// <param name="timeout">Timeout in sec. Default is 30s.</param>
-	/// <param name="attempts">Default is 3.</param>
+	/// <param name="inputTimeout">Timeout in sec. Default is 30s.</param>
+	/// <param name="inputAttempts">Default is 3.</param>
 	/// <returns></returns>
-	public PicLoader SetTimeout(int timeout, int attempts)
+	public PicLoader SetTimeout(int inputTimeout, int inputAttempts)
 	{
-		this.timeout = timeout;
-		this.timeoutAttempts = attempts;
+		timeout = inputTimeout;
+		timeoutAttempts = inputAttempts;
 
 		if (enableLog)
-			Debug.Log($"$[PicLoader] Timeout set : {timeout} sec & {timeoutAttempts} attempts");
+			Debug.Log($"$[PicLoader] Timeout set : {inputTimeout} sec & {timeoutAttempts} inputAttempts");
 
 		return this;
 	}
@@ -284,14 +336,14 @@ public class PicLoader : MonoBehaviour
 	{
 		if (url == null)
 		{
-			Error("Url has not been set. Use 'Load' function to set image url.");
+			Error("Url has not been set. Use 'Load' function to set inputImage inputSettings.");
 			return;
 		}
 
 		try
 		{
 			var uri = new Uri(url);
-			this.url = uri.AbsoluteUri;
+			url = uri.AbsoluteUri;
 		}
 		catch (Exception)
 		{
@@ -313,14 +365,14 @@ public class PicLoader : MonoBehaviour
 
 		onStartAction?.Invoke();
 
-		if (!Directory.Exists(filePath))
-			Directory.CreateDirectory(filePath);
+		if (!Directory.Exists(Filepath))
+			Directory.CreateDirectory(Filepath);
 
 		uniqueHash = CreateMD5(url);
 
-		if (underProcess.ContainsKey(uniqueHash))
+		if (UnderProcess.ContainsKey(uniqueHash))
 		{
-			PicLoader sameProcess = underProcess[uniqueHash];
+			PicLoader sameProcess = UnderProcess[uniqueHash];
 			sameProcess.onDownloadedAction += () =>
 			{
 				onDownloadedAction?.Invoke();
@@ -330,14 +382,14 @@ public class PicLoader : MonoBehaviour
 			return;
 		}
 
-		if (File.Exists(filePath + uniqueHash))
+		if (File.Exists(Filepath + uniqueHash))
 		{
 			onDownloadedAction?.Invoke();
 			LoadSpriteToImage();
 			return;
 		}
 
-		underProcess.Add(uniqueHash, this);
+		UnderProcess.Add(uniqueHash, this);
 		StopAllCoroutines();
 		StartCoroutine(nameof(Downloader));
 	}
@@ -360,13 +412,15 @@ public class PicLoader : MonoBehaviour
 			webRequest.SendWebRequest();
 
 			if (attempts++ > 0)
+			{
 				Debug.Log($"504 Timeout error. Retrying... [attempt: {attempts}]");
+			}
 
 			while (!webRequest.isDone)
 			{
 				if (webRequest.error != null)
 				{
-					Error("Error while downloading the image : " + webRequest.error);
+					Error("Error while downloading the inputImage : " + webRequest.error);
 					yield break;
 				}
 
@@ -374,35 +428,41 @@ public class PicLoader : MonoBehaviour
 				onDownloadProgressChange?.Invoke(progress);
 
 				if (enableLog)
+				{
 					Debug.Log("[PicLoader] Downloading progress : " + progress + "%");
+				}
 				yield return null;
 			}
-		} while (!webRequest.isDone || webRequest.responseCode == 504 && attempts <= timeoutAttempts);
+		} while (!webRequest.isDone
+		         || webRequest.result == UnityWebRequest.Result.ConnectionError 
+		         || webRequest.result == UnityWebRequest.Result.ProtocolError 
+		         && attempts <= timeoutAttempts);
 
 		if (webRequest.error == null)
-			File.WriteAllBytes(filePath + uniqueHash, webRequest.downloadHandler.data);
+		{
+			File.WriteAllBytes(Filepath + uniqueHash, webRequest.downloadHandler.data);
+		}
 
 		webRequest.Dispose();
 		webRequest = null;
 
+		progress = 100;
+		onDownloadProgressChange?.Invoke(progress);
+		
 		onDownloadedAction?.Invoke();
-
 		LoadSpriteToImage();
 
-		underProcess.Remove(uniqueHash);
+		UnderProcess.Remove(uniqueHash);
 	}
 
 	private void LoadSpriteToImage()
 	{
-		progress = 100;
-		onDownloadProgressChange?.Invoke(progress);
-
 		if (enableLog)
 			Debug.Log("[PicLoader] Downloading progress : " + progress + "%");
 
-		if (!File.Exists(filePath + uniqueHash))
+		if (!File.Exists(Filepath + uniqueHash))
 		{
-			Error("Loading image file has been failed.");
+			Error("Loading inputImage file has been failed.");
 			return;
 		}
 
@@ -415,8 +475,8 @@ public class PicLoader : MonoBehaviour
 		switch (rendererType)
 		{
 			case RendererType.Renderer:
-				Renderer renderer = targetObj.GetComponent<Renderer>();
-				renderer.material.mainTexture = loadingPlaceholder;
+				Renderer newRenderer = targetObj.GetComponent<Renderer>();
+				newRenderer.material.mainTexture = loadingPlaceholder;
 				break;
 
 			case RendererType.UiImage:
@@ -433,21 +493,17 @@ public class PicLoader : MonoBehaviour
 		}
 	}
 
-	private IEnumerator ImageLoader(Texture2D texture = null)
+	private IEnumerator ImageLoader(Texture2D inputTexture = null)
 	{
 		if (enableLog)
-			Debug.Log("[PicLoader] Start loading image.");
+			Debug.Log("[PicLoader] Start loading inputImage.");
 
-		if (texture == null)
+		if (inputTexture == null)
 		{
-			byte[] fileData;
-			fileData = File.ReadAllBytes(filePath + uniqueHash);
-			texture = new Texture2D(2, 2);
-			//ImageConversion.LoadImage(texture, fileData);
-			texture.LoadImage(fileData); //..this will auto-resize the texture dimensions.
+			var fileData = File.ReadAllBytes(Filepath + uniqueHash);
+			inputTexture = new Texture2D(2, 2);
+			inputTexture.LoadImage(fileData); //..this will auto-resize the inputTexture dimensions.
 		}
-
-		Color color;
 
 		if (targetObj != null)
 			switch (rendererType)
@@ -471,33 +527,33 @@ public class PicLoader : MonoBehaviour
 			Debug.Log("[PicLoader] Image has been loaded.");
 
 		Finish();
-
+		
 		// Loaders
 		IEnumerator LoadRenderer()
 		{
-			var renderer = targetObj.GetComponent<Renderer>();
+			var mRenderer = targetObj.GetComponent<Renderer>();
 
-			if (renderer == null || renderer.material == null)
+			if (mRenderer == null || mRenderer.material == null)
 				yield break;
 
-			renderer.material.mainTexture = texture;
+			mRenderer.material.mainTexture = inputTexture;
 
-			if (fadeTime > 0 && renderer.material.HasProperty("_Color"))
+			if (fadeTime > 0 && mRenderer.material.HasProperty("_Color"))
 			{
-				var material = renderer.material;
-				var color = material.color;
-				var maxAlpha = color.a;
+				var material = mRenderer.material;
+				var newColor = material.color;
+				var maxAlpha = newColor.a;
 
-				color.a = 0;
+				newColor.a = 0;
 
-				material.color = color;
+				material.color = newColor;
 				float time = Time.time;
-				while (color.a < maxAlpha)
+				while (newColor.a < maxAlpha)
 				{
-					color.a = Mathf.Lerp(0, maxAlpha, (Time.time - time) / fadeTime);
+					newColor.a = Mathf.Lerp(0, maxAlpha, (Time.time - time) / fadeTime);
 
-					if (renderer != null)
-						renderer.material.color = color;
+					if (mRenderer != null)
+						mRenderer.material.color = newColor;
 
 					yield return null;
 				}
@@ -506,30 +562,30 @@ public class PicLoader : MonoBehaviour
 
 		IEnumerator LoadUiImage()
 		{
-			var image = targetObj.GetComponent<Image>();
+			var mImage = targetObj.GetComponent<Image>();
 
-			if (image == null)
+			if (mImage == null)
 				yield break;
 
-			Sprite sprite = Sprite.Create(texture,
-				new Rect(0, 0, texture.width, texture.height), new Vector2(0.5f, 0.5f));
+			Sprite sprite = Sprite.Create(inputTexture,
+				new Rect(0, 0, inputTexture.width, inputTexture.height), new Vector2(0.5f, 0.5f));
 
-			image.sprite = sprite;
-			var color = image.color;
-			var maxAlpha = color.a;
+			mImage.sprite = sprite;
+			var newColor = mImage.color;
+			var maxAlpha = newColor.a;
 
 			if (fadeTime > 0)
 			{
-				color.a = 0;
-				image.color = color;
+				newColor.a = 0;
+				mImage.color = newColor;
 
 				float time = Time.time;
-				while (color.a < maxAlpha)
+				while (newColor.a < maxAlpha)
 				{
-					color.a = Mathf.Lerp(0, maxAlpha, (Time.time - time) / fadeTime);
+					newColor.a = Mathf.Lerp(0, maxAlpha, (Time.time - time) / fadeTime);
 
-					if (image != null)
-						image.color = color;
+					if (mImage != null)
+						mImage.color = newColor;
 					yield return null;
 				}
 			}
@@ -537,38 +593,38 @@ public class PicLoader : MonoBehaviour
 
 		IEnumerator LoadRawImage()
 		{
-			var rawImage = targetObj.GetComponent<RawImage>();
+			var mRawImage = targetObj.GetComponent<RawImage>();
 
-			if (rawImage == null)
+			if (mRawImage == null)
 				yield break;
 
-			rawImage.texture = texture;
-			var color = rawImage.color;
-			var maxAlpha = color.a;
+			mRawImage.texture = inputTexture;
+			var newColor = mRawImage.color;
+			var maxAlpha = newColor.a;
 
 			if (fadeTime > 0)
 			{
-				color.a = 0;
-				rawImage.color = color;
+				newColor.a = 0;
+				mRawImage.color = newColor;
 
 				float time = Time.time;
-				while (color.a < maxAlpha)
+				while (newColor.a < maxAlpha)
 				{
-					color.a = Mathf.Lerp(0, maxAlpha, (Time.time - time) / fadeTime);
+					newColor.a = Mathf.Lerp(0, maxAlpha, (Time.time - time) / fadeTime);
 
-					if (rawImage != null)
-						rawImage.color = color;
+					if (mRawImage != null)
+						mRawImage.color = newColor;
 					yield return null;
 				}
 			}
 		}
 	}
 
-	private static string CreateMD5(string input)
+	private static string CreateMD5(string inputString)
 	{
-		// Use input string to calculate MD5 hash
+		// Use inputString string to calculate MD5 hash
 		using System.Security.Cryptography.MD5 md5 = System.Security.Cryptography.MD5.Create();
-		byte[] inputBytes = Encoding.ASCII.GetBytes(input);
+		byte[] inputBytes = Encoding.ASCII.GetBytes(inputString);
 		byte[] hashBytes = md5.ComputeHash(inputBytes);
 
 		// Convert the byte array to hexadecimal string
@@ -579,12 +635,12 @@ public class PicLoader : MonoBehaviour
 		return sb.ToString();
 	}
 
-	private void Error(string message)
+	private void Error(string inputMessage)
 	{
 		if (enableLog)
-			Debug.LogError("[PicLoader] Error : " + message);
+			Debug.LogError("[PicLoader] Error : " + inputMessage);
 
-		onErrorAction?.Invoke(message);
+		onErrorAction?.Invoke(inputMessage);
 
 		if (errorPlaceholder != null)
 			StartCoroutine(ImageLoader(errorPlaceholder));
@@ -600,63 +656,63 @@ public class PicLoader : MonoBehaviour
 		{
 			try
 			{
-				File.Delete(filePath + uniqueHash);
+				File.Delete(Filepath + uniqueHash);
 			}
 			catch (Exception ex)
 			{
 				if (enableLog)
-					Debug.LogError($"[PicLoader] Error while removing cached file: {ex.Message}");
+					Debug.LogError($"[PicLoader] Error while removing inputCached file: {ex.Message}");
 			}
 		}
 
 		onEndAction?.Invoke();
-
-		Invoke(nameof(Destroyer), 0.5f);
+		
+		Invoke(nameof(DestroyMe), 0.5f);
 	}
 
-	private void Destroyer()
+	private void DestroyMe()
 	{
-		Destroy(gameObject);
+		Destroy(destroyOnFinish? gameObject: this);
 	}
 
 	/// <summary>
-	/// Clear a certain cached file with its url
+	/// Clear a certain inputCached file with its inputSettings
 	/// </summary>
-	/// <param name="url">Cached file url.</param>
+	/// <param name="inputUrl">Cached file inputSettings.</param>
 	/// <returns></returns>
-	public static void ClearCache(string url)
+	public static void ClearCache(string inputUrl)
 	{
 		try
 		{
-			File.Delete(filePath + CreateMD5(url));
+			File.Delete(Filepath + CreateMD5(inputUrl));
 
-			if (ENABLE_GLOBAL_LOGS)
-				Debug.Log($"[PicLoader] Cached file has been cleared: {url}");
+			if (EnableGlobalLogs)
+				Debug.Log($"[PicLoader] Cached file has been cleared: {inputUrl}");
 		}
 		catch (Exception ex)
 		{
-			if (ENABLE_GLOBAL_LOGS)
-				Debug.LogError($"[PicLoader] Error while removing cached file: {ex.Message}");
+			if (EnableGlobalLogs)
+				Debug.LogError($"[PicLoader] Error while removing inputCached file: {ex.Message}");
 		}
 	}
 
 	/// <summary>
-	/// Clear all picLoader cached files
+	/// Clear all picLoader inputCached files
 	/// </summary>
 	/// <returns></returns>
 	public static void ClearAllCachedFiles()
 	{
 		try
 		{
-			Directory.Delete(filePath, true);
+			Directory.Delete(Filepath, true);
 
-			if (ENABLE_GLOBAL_LOGS)
-				Debug.Log("[PicLoader] All PicLoader cached files has been cleared.");
+			if (EnableGlobalLogs)
+				Debug.Log("[PicLoader] All PicLoader inputCached files has been cleared.");
 		}
 		catch (Exception ex)
 		{
-			if (ENABLE_GLOBAL_LOGS)
-				Debug.LogError($"[PicLoader] Error while removing cached file: {ex.Message}");
+			if (EnableGlobalLogs)
+				Debug.LogError($"[PicLoader] Error while removing inputCached file: {ex.Message}");
 		}
 	}
 }
