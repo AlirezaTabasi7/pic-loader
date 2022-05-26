@@ -11,6 +11,16 @@ using UnityEngine.UI;
 using UnityEngine.Events;
 using System.Collections;
 
+
+/*Todo:
+ managing cache files and delete them automatically if necessary
+ what will happens if user disk is full?
+ look for changes in the server and reCache images if applicable
+ check if URL is a valid
+ ability to cancel download (do we need that?)
+ issue: since this downloader/ loader works with coroutines it will be paused if we alt+tab and etc 
+ */
+
 /// <inheritdoc />
 /// <summary>
 /// PicLoader - A Run-Time inputImage downloading and caching library.
@@ -63,7 +73,7 @@ public class PicLoader : MonoBehaviour
 	private UnityAction<int> onDownloadProgressChange;
 	private UnityAction<string> onErrorAction;
 
-	private static readonly Dictionary<string, PicLoader> UnderProcess = new ();
+	private static readonly Dictionary<string, PicLoader> UnderProcess = new Dictionary<string, PicLoader>();
 
 	private string uniqueHash;
 	private int progress;

@@ -890,7 +890,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6f985df4c9380a749b74a52bc5575621, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  imageAddress: https://www.eikojones.com/wp-content/uploads/2015/06/alders-and-maple-in-fall-1-x-3-ratio.jpg
+  imageAddress: https://imgur.com/L8sn6I8
   picLoaderSettings: {fileID: 11400000, guid: e30a75104cec80f47875611384da6d17, type: 2}
 --- !u!114 &1767023212
 MonoBehaviour:
