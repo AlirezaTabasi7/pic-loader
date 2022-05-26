@@ -682,7 +682,13 @@ public class PicLoader : MonoBehaviour
 
 	private void DestroyMe()
 	{
-		Destroy(destroyOnFinish? gameObject: this);
+		if (destroyOnFinish)
+		{
+			instance = null;
+			Destroy(gameObject);
+		}
+		
+		Destroy(this);
 	}
 
 	/// <summary>
